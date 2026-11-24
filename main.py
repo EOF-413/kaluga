@@ -1,0 +1,219 @@
+import os
+import sqlite3
+import sys
+from addEditCoffeeForm_ui import Ui_Dialog
+from main_ui import Ui_MainWindow
+from PyQt6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QMainWindow,
+    QMessageBox,
+    QTableWidgetItem,
+)
+
+
+def get_db_path():
+    """Возвращает корректный путь к базе данных для .py и для .exe."""
+    if getattr(sys, "frozen", False):
+        base_dir = os.path.dirname(sys.executable)
+    else:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_dir, "data", "coffee.sqlite")
+
+
+class AddEditCoffeeDialog(QDialog, Ui_Dialog):
+
+    def __init__(self, db_path, table_name, coffee_id=None, parent=None):
+        super().__init__(parent)
+        self.setupUi(self)
+        self.db_path = db_path
+        self.table_name = table_name
+        self.coffee_id = coffee_id
+
+        self.roastComboBox.addItems(["Светлая", "Средняя", "Темная"])
+        self.typeComboBox.addItems(["В зернах", "Молотый"])
+
+        if self.coffee_id is not None:
+            self.setWindowTitle("Редактировать запись о кофе")
+            self.load_coffee_data()
+        else:
+            self.setWindowTitle("Добавить новый сорт кофе")
+
+        self.saveButton.clicked.connect(self.save_data)
+        self.cancelButton.clicked.connect(self.reject)
+
+    def load_coffee_data(self):
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                f"SELECT * FROM {self.table_name} WHERE id = ?",
+                (self.coffee_id,),
+            )
+            row = cursor.fetchone()
+            conn.close()
+
+            if row:
+                self.sortEdit.setText(str(row))
+                self.roastComboBox.setCurrentText(str(row))
+                self.typeComboBox.setCurrentText(str(row))
+                self.tasteEdit.setPlainText(str(row) if row else "")
+                self.priceSpinBox.setValue(float(row))
+                self.volumeSpinBox.setValue(int(row))
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Ошибка БД", f"Не удалось загрузить запись:\n{e}"
+            )
+
+    def save_data(self):
+        sort_name = self.sortEdit.text().strip()
+        if not sort_name:
+            QMessageBox.warning(
+                self, "Ошибка ввода", "Название сорта не может быть пустым!"
+            )
+            return
+
+        roast = self.roastComboBox.currentText()
+        coffee_type = self.typeComboBox.currentText()
+        taste = self.tasteEdit.toPlainText().strip()
+        price = self.priceSpinBox.value()
+        volume = self.volumeSpinBox.value()
+
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            cursor.execute(f"PRAGMA table_info({self.table_name})")
+            columns = [col for col in cursor.fetchall()]
+
+            if self.coffee_id is None:
+                cols_str = ", ".join(columns[1:])
+                cursor.execute(
+                    f"INSERT INTO {self.table_name} ({cols_str}) VALUES (?, ?, ?, ?, ?, ?)",
+                    (sort_name, roast, coffee_type, taste, price, volume),
+                )
+            else:
+                set_clause = ", ".join([f"{col} = ?" for col in columns[1:]])
+                cursor.execute(
+                    f"UPDATE {self.table_name} SET {set_clause} WHERE {columns} = ?",
+                    (
+                        sort_name,
+                        roast,
+                        coffee_type,
+                        taste,
+                        price,
+                        volume,
+                        self.coffee_id,
+                    ),
+                )
+
+            conn.commit()
+            conn.close()
+            self.accept()
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Ошибка сохранения", f"Не удалось сохранить данные:\n{e}"
+            )
+
+
+class CoffeeApp(QMainWindow, Ui_MainWindow):
+
+    def __init__(self):
+        super().__init__()
+        self.setupUi(self)
+        self.db_path = get_db_path()
+        self.table_name = self.get_table_name()
+
+        self.addButton.clicked.connect(self.add_coffee)
+        self.editButton.clicked.connect(self.edit_coffee)
+        self.tableWidget.cellDoubleClicked.connect(self.edit_coffee)
+
+        self.tableWidget.setEditTriggers(
+            self.tableWidget.EditTrigger.NoEditTriggers
+        )
+        self.tableWidget.setSelectionBehavior(
+            self.tableWidget.SelectionBehavior.SelectRows
+        )
+
+        self.load_data()
+
+    def get_table_name(self):
+        if not os.path.exists(self.db_path):
+            QMessageBox.critical(
+                self,
+                "Ошибка",
+                f"Файл базы данных не найден по пути:\n{self.db_path}",
+            )
+            return "coffee"
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tables = cursor.fetchall()
+        conn.close()
+        return next((t for t in tables if t != "sqlite_sequence"), "coffee")
+
+    def load_data(self):
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT * FROM {self.table_name}")
+            rows = cursor.fetchall()
+            conn.close()
+
+            headers = [
+                "ID",
+                "Название сорта",
+                "Степень обжарки",
+                "Молотый/в зернах",
+                "Описание вкуса",
+                "Цена",
+                "Объем упаковки",
+            ]
+
+            self.tableWidget.setColumnCount(len(headers))
+            self.tableWidget.setHorizontalHeaderLabels(headers)
+            self.tableWidget.setRowCount(len(rows))
+
+            for row_idx, row_data in enumerate(rows):
+                for col_idx, value in enumerate(row_data):
+                    self.tableWidget.setItem(
+                        row_idx, col_idx, QTableWidgetItem(str(value))
+                    )
+
+            self.tableWidget.resizeColumnsToContents()
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Ошибка", f"Не удалось загрузить данные:\n{e}"
+            )
+
+    def add_coffee(self):
+        dialog = AddEditCoffeeDialog(self.db_path, self.table_name, parent=self)
+        if dialog.exec():
+            self.load_data()
+
+    def edit_coffee(self):
+        selected_rows = self.tableWidget.selectionModel().selectedRows()
+        if not selected_rows:
+            QMessageBox.information(
+                self,
+                "Внимание",
+                "Выберите строку в таблице для редактирования.",
+            )
+            return
+
+        row_idx = selected_rows.row()
+        coffee_id = int(self.tableWidget.item(row_idx, 0).text())
+
+        dialog = AddEditCoffeeDialog(
+            self.db_path, self.table_name, coffee_id=coffee_id, parent=self
+        )
+        if dialog.exec():
+            self.load_data()
+
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = CoffeeApp()
+    window.show()
+    sys.exit(app.exec())
