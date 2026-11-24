@@ -1,41 +1,39 @@
-import random
 import sys
-from PyQt6 import uic
-from PyQt6.QtGui import QColor, QPainter
-from PyQt6.QtWidgets import QApplication, QMainWindow
+import random
+from PyQt5 import uic
+from PyQt5.QtGui import QPainter, QColor
+from PyQt5.QtWidgets import QApplication, QMainWindow
 
 
-class MainWindow(QMainWindow):
+class YellowCircles(QMainWindow):
     def __init__(self):
         super().__init__()
-        uic.loadUi("UI.ui", self)
-        self.circles = []
-        self.pushButton.clicked.connect(self.add_circle)
+        uic.loadUi('UI.ui', self)
+        self.do_paint = False
+        self.pushButton.clicked.connect(self.paint)
 
-    def add_circle(self):
-        diameter = random.randint(20, 150)
-        max_x = max(0, self.width() - diameter)
-        max_y = max(0, self.height() - diameter)
-        x = random.randint(0, max_x)
-        y = random.randint(0, max_y)
-        self.circles.append((x, y, diameter))
-        self.update()
+    def paint(self):
+        self.do_paint = True
+        self.repaint()
 
     def paintEvent(self, event):
-        super().paintEvent(event)
-        if not self.circles:
-            return
+        if self.do_paint:
+            qp = QPainter()
+            qp.begin(self)
+            self.draw_circle(qp)
+            qp.end()
+            self.do_paint = False
 
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setBrush(QColor(255, 255, 0))
-        painter.setPen(QColor(255, 255, 0))
-        for x, y, diameter in self.circles:
-            painter.drawEllipse(x, y, diameter, diameter)
+    def draw_circle(self, qp):
+        qp.setBrush(QColor(255, 255, 0))
+        d = random.randint(20, 150)
+        x = random.randint(0, self.width() - d)
+        y = random.randint(0, self.height() - d)
+        qp.drawEllipse(x, y, d, d)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     app = QApplication(sys.argv)
-    window = MainWindow()
-    window.show()
-    sys.exit(app.exec())
+    ex = YellowCircles()
+    ex.show()
+    sys.exit(app.exec_())
